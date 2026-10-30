@@ -82,3 +82,47 @@ def test_create_new_table(mocker, unlogged, expected):
     assert table.exists is False
     assert table.create(unlogged=unlogged) is True
     exec_sql.assert_called_once_with(table, expected, return_bool=True)
+
+
+class FailJson(Exception):
+    pass
+
+
+def run_main_with_params(mocker, **params):
+    module_params = {
+        'table': 'test_table',
+        'state': 'present',
+        'tablespace': None,
+        'owner': None,
+        'unlogged': None,
+        'like': None,
+        'including': None,
+        'storage_params': None,
+        'truncate': False,
+        'columns': None,
+        'cascade': False,
+        'session_role': None,
+        'trust_input': True,
+    }
+    module_params.update(params)
+    module = mocker.MagicMock()
+    module.params = module_params
+    module.fail_json.side_effect = FailJson
+    mocker.patch.object(postgresql_table, 'AnsibleModule', return_value=module)
+    connect = mocker.patch.object(postgresql_table, 'ensure_required_libs', side_effect=AssertionError('must fail before connecting'))
+    with pytest.raises(FailJson):
+        postgresql_table.main()
+    connect.assert_not_called()
+    return module.fail_json.call_args[1]['msg']
+
+
+@pytest.mark.parametrize('unlogged', [True, False])
+def test_absent_is_mutually_exclusive_with_unlogged(mocker, unlogged):
+    msg = run_main_with_params(mocker, state='absent', unlogged=unlogged)
+    assert 'state=absent is mutually exclusive with' in msg
+
+
+@pytest.mark.parametrize('unlogged', [True, False])
+def test_truncate_is_mutually_exclusive_with_unlogged(mocker, unlogged):
+    msg = run_main_with_params(mocker, truncate=True, unlogged=unlogged)
+    assert 'truncate is mutually exclusive with' in msg
